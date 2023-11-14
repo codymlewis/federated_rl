@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "federated-rl"
+version = "0.1.0"
+description = ""
+authors = ["Cody Lewis <hello@codymlewis.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.11,<3.13"
+gymnasium = {extras = ["classic-control"], version = "^0.29.1"}
+rlax = "^0.1.6"
+flax = "^0.7.5"
+optax = "^0.1.7"
+
+[tool.poetry.group.dev.dependencies]
+autopep8 = "^2.0.4"
+jedi = "^0.19.1"
+flake8 = "^6.1.0"
+python-lsp-server = "^1.8.0"
+yapf = "^0.40.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
