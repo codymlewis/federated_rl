@@ -109,13 +109,13 @@ if __name__ == "__main__":
             memory.push(observation, action, next_observation, reward)
             observation = next_observation
             loss, state = learner_step(state, target_params, memory)
-            pbar.set_postfix_str(f"Loss: {loss:.5f}")
 
             # # Soft update of the target network's weights
             # # θ′ ← τ θ + (1 −τ )θ′
             tau = 0.005
             target_params = jax.tree_util.tree_map(lambda tp, op: op * tau + tp * (1 - tau), target_params, state.params)
             if terminated or truncated:
+                pbar.set_postfix_str(f"Loss: {loss:.5f}, Reward: {reward:.5f}, Dur: {episode_durations[-1]}")
                 episode_durations.append(0)
                 break
 
