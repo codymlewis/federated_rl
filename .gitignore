@@ -1,3 +1,4 @@
 poetry.lock
 tags
 Session.vim
+__pycache__/

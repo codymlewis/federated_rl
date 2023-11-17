@@ -15,6 +15,7 @@ tqdm = "^4.66.1"
 swig = "^4.1.1.post0"
 matplotlib = "^3.8.1"
 grid2op = "^1.9.6"
+orbax = "^0.1.9"
 
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.4"
