@@ -7,11 +7,14 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.13"
-gymnasium = {extras = ["classic-control"], version = "^0.29.1"}
+gymnasium = {extras = ["box2d"], version = "^0.29.1"}
 rlax = "^0.1.6"
 flax = "^0.7.5"
 optax = "^0.1.7"
 tqdm = "^4.66.1"
+swig = "^4.1.1.post0"
+matplotlib = "^3.8.1"
+grid2op = "^1.9.6"
 
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.4"

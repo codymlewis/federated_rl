@@ -1,4 +1,5 @@
-from collections import deque, namedtuple
+from collections import deque
+from typing import NamedTuple
 import math
 import random
 import itertools
@@ -8,11 +9,15 @@ import jax.numpy as jnp
 import flax.linen as nn
 from flax.training import train_state
 import optax
-import rlax
 from tqdm import trange
+import chex
 
 
-Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'))
+class Transition(NamedTuple):
+    state: chex.Array
+    action: int
+    next_state: chex.Array
+    reward: float
 
 
 class ReplayMemory(object):
@@ -43,80 +48,94 @@ class DQN(nn.Module):
         return x
 
 
-def select_action(state, observation, key, evaluation: bool):
-    q = state.apply_fn(state.params, observation)
-    eps = 0.05 + (0.9 - 0.05) * math.exp(-1. * state.step / 1000)
-    train_a = rlax.epsilon_greedy(eps).sample(key, q)
-    eval_a = rlax.greedy().sample(key, q)
-    a = jax.lax.select(evaluation, eval_a, train_a)
-    return a
+@jax.jit
+def select_action(state, observation, key, steps_done, default_action, evaluation: bool):
+    eps = 0.05 + (0.9 - 0.05) * jnp.exp(-1. * steps_done / 1000)
+    return jnp.where(jax.random.uniform(key) > eps, jnp.argmax(state.apply_fn(state.params, observation)), default_action)
 
 
-def learner_step(state, target_params, memory, batch_size: int = 128):
-    if len(memory) < batch_size:
-        return 0.0, state
-    transitions = memory.sample(batch_size)
-    batch = Transition(*zip(*transitions))
-    non_final_mask = jnp.array(tuple(map(lambda s: s is not None, batch.next_state)), dtype=bool)
-    non_final_next_states = jnp.array([s for s in batch.next_state if s is not None])
-
+@jax.jit
+def learner_step(state, target_params, batch, gamma: float = 0.99):
     state_batch = jnp.array(batch.state)
     action_batch = jnp.array(batch.action)
     reward_batch = jnp.array(batch.reward)
-    next_state_values = jnp.zeros(batch_size)
-    next_state_values.at[non_final_mask].set(state.apply_fn(target_params, non_final_next_states).max(1))
-    expected_state_action_values = (next_state_values * 0.99) + reward_batch
+    next_state_batch = jnp.array(batch.next_state)
+    next_state_values = jnp.where(
+        jnp.isnan(next_state_batch).any(1),
+        jnp.zeros_like(state_batch.shape[0]),
+        state.apply_fn(target_params, next_state_batch).max(1),
+    )
+    expected_state_action_values = (next_state_values * gamma) + reward_batch
 
     def loss_fn(params, delta=1.0):
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
-        state_action_values = jnp.take(state.apply_fn(state.params, state_batch), action_batch, axis=1)
-        expected_sav = jax.nn.one_hot(expected_state_action_values, state_action_values.shape[-1])
-        dist = jnp.abs(state_action_values - expected_sav)
-        return jnp.mean(jnp.where(dist < delta, 0.5 * dist**2, delta * (dist - 0.5 * delta)))
+        state_action_values = state.apply_fn(params, state_batch)[jnp.arange(action_batch.shape[0]), action_batch]
+        # state_action_values = jnp.take_along_axis(
+        #     state.apply_fn(params, state_batch),
+        #     action_batch.reshape(-1, 1),
+        #     axis=1
+        # ).reshape(-1)
+        dist = jnp.abs(state_action_values - expected_state_action_values)
+        return jnp.mean(jnp.where(dist < delta, 0.5 * dist**2 / delta, dist - 0.5 * delta))
 
     loss, grads = jax.value_and_grad(loss_fn)(state.params)
+    grads = jax.tree_util.tree_map(lambda g: jnp.clip(g, -100, 100), grads)
     state = state.apply_gradients(grads=grads)
     return loss, state
 
 
 if __name__ == "__main__":
+    batch_size = 128
+    tau = 0.005
+    num_episodes = 600
+    seed = 62
     # env = gym.make("CartPole-v1", render_mode="human")
     env = gym.make("CartPole-v1")
-    observation, info = env.reset(seed=42)
+    observation, info = env.reset(seed=seed)
     model = DQN(env.action_space.n)
-    rng_key = jax.random.PRNGKey(42)
+    rng_key = jax.random.PRNGKey(seed)
     state = train_state.TrainState.create(
         apply_fn=model.apply,
         params=model.init(rng_key, observation),
-        tx=optax.adamw(1e-4),
+        # tx=optax.chain(optax.amsgrad(1e-4), optax.add_decayed_weights(1e-2)),
+        tx=optax.amsgrad(1e-3),
     )
-    target_params = state.params.copy()
+    target_params = model.init(rng_key, observation)
     memory = ReplayMemory(10000)
-
-    episode_durations = [0]
-    for i in (pbar := trange(500)):
-        observation, info = env.reset()
+    episode_durations = []
+    episode_rng_keys = iter(jax.random.split(rng_key, (num_episodes, 500)))
+    steps_done = 0
+    for e in (pbar := trange(num_episodes)):
+        observation, info = env.reset(seed=round(math.pi * e**2) + seed)
+        rng_keys = iter(next(episode_rng_keys))
         for i in itertools.count():
-            rng_key = jax.random.split(rng_key, 1)[0]
-            action = select_action(state, observation, rng_key, evaluation=False)
-            observation, reward, terminated, truncated, info = env.step(action.item())
-            episode_durations[-1] += 1
+            rng_key = next(rng_keys)
+            action = select_action(state, observation, rng_key, steps_done, env.action_space.sample(), evaluation=False)
+            steps_done += 1
+            new_observation, reward, terminated, truncated, info = env.step(action.item())
 
-            next_observation = observation
+            if terminated:
+                next_observation = jnp.full_like(new_observation, jnp.nan)
+            else:
+                next_observation = new_observation
 
             memory.push(observation, action, next_observation, reward)
             observation = next_observation
-            loss, state = learner_step(state, target_params, memory)
+            if len(memory) >= batch_size:
+                transitions = memory.sample(batch_size)
+                batch = Transition(*zip(*transitions))
+                loss, state = learner_step(state, target_params, batch)
+            else:
+                loss = 0.0
 
             # # Soft update of the target network's weights
             # # θ′ ← τ θ + (1 −τ )θ′
-            tau = 0.005
             target_params = jax.tree_util.tree_map(lambda tp, op: op * tau + tp * (1 - tau), target_params, state.params)
             if terminated or truncated:
-                pbar.set_postfix_str(f"Loss: {loss:.5f}, Reward: {reward:.5f}, Dur: {episode_durations[-1]}")
-                episode_durations.append(0)
+                pbar.set_postfix_str(f"Loss: {loss:.5f}, Reward: {reward:.5f}, Dur: {i + 1}")
+                episode_durations.append(i + 1)
                 break
 
     env.close()
