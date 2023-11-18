@@ -111,6 +111,11 @@ def fedavg(all_params):
     return jax.tree_util.tree_map(lambda *x: sum(x) / len(x), *all_params)
 
 
+@jax.jit
+def interpolate_params(params_a, params_b, tau):
+    return jax.tree_util.tree_map(lambda a, b: b * tau + a * (1 - tau), params_a, params_b)
+
+
 if __name__ == "__main__":
     batch_size = 128
     tau = 0.005
@@ -160,8 +165,7 @@ if __name__ == "__main__":
                     loss = 0.0
 
                 # Soft update of the target network's weights
-                client.target_params = jax.tree_util.tree_map(
-                    lambda tp, op: op * tau + tp * (1 - tau), client.target_params, client.state.params)
+                client.target_params = interpolate_params(client.target_params, client.state.params, tau)
                 if terminated or truncated:
                     losses.append(loss)
                     episode_durations[-1].append(i + 1)
