@@ -1,6 +1,6 @@
 # Federated Reinforcement Learning
 
-A demonstration of deep reinforcement learning within a deep learning setting.
+A demonstration of deep reinforcement learning within a federated learning setting.
 
 ## Setup
 
