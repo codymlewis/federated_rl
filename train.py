@@ -1,5 +1,4 @@
-from collections import deque
-from typing import Tuple, List, NamedTuple
+from typing import Tuple
 import math
 import random
 import itertools
@@ -15,26 +14,31 @@ import chex
 import orbax.checkpoint as ocp
 
 
-class Transition(NamedTuple):
-    state: chex.Array
-    action: int
-    next_state: chex.Array
-    reward: float
+class ReplayMemory:
+    def __init__(self, obs_shape: Tuple[int], act_shape: Tuple[int], capacity: int, seed: int = 63):
+        self.capacity = capacity
+        self.times_pushed = 0
+        self.push_index = 0
+        self.rng = np.random.default_rng(seed)
+        self.observations = np.zeros((capacity,) + obs_shape, dtype=np.float32)
+        self.actions = np.zeros((capacity,) + act_shape, dtype=np.float32)
+        self.next_observations = np.zeros((capacity,) + obs_shape, dtype=np.float32)
+        self.rewards = np.zeros(capacity, dtype=np.float32)
 
+    def push(self, observation: chex.Array, action: chex.Array, next_observation: chex.Array, reward: int):
+        self.observations[self.push_index] = observation
+        self.actions[self.push_index] = action
+        self.next_observations[self.push_index] = next_observation
+        self.rewards[self.push_index] = reward
+        self.push_index = (self.push_index + 1) % self.capacity
+        self.times_pushed += 1
 
-class ReplayMemory(object):
-    def __init__(self, capacity: int):
-        self.memory = deque([], maxlen=capacity)
-
-    def push(self, *args):
-        """Save a transition"""
-        self.memory.append(Transition(*args))
-
-    def sample(self, batch_size: int) -> List[Transition]:
-        return random.sample(self.memory, batch_size)
+    def sample(self, batch_size: int = 128) -> Tuple[chex.Array, chex.Array, chex.Array, chex.Array]:
+        idx = self.rng.choice(min(self.times_pushed, self.capacity), size=batch_size)
+        return self.observations[idx], self.actions[idx], self.next_observations[idx], self.rewards[idx]
 
     def __len__(self) -> int:
-        return len(self.memory)
+        return min(self.times_pushed, self.capacity)
 
 
 class DQN(nn.Module):
@@ -72,22 +76,24 @@ def select_action(
 
 @jax.jit
 def learner_step(
-    state: train_state.TrainState, target_params: optax.Params, batch: Transition, gamma: float = 0.99
+    state: train_state.TrainState,
+    target_params: optax.Params,
+    obs_batch: chex.Array,
+    action_batch: chex.Array,
+    next_obs_batch: chex.Array,
+    reward_batch: chex.Array,
+    gamma: float = 0.99
 ) -> Tuple[float, train_state.TrainState]:
-    state_batch = jnp.array(batch.state)
-    action_batch = jnp.array(batch.action)
-    reward_batch = jnp.array(batch.reward)
-    next_state_batch = jnp.array(batch.next_state)
-    next_state_values = jnp.where(
-        jnp.isnan(next_state_batch).any(1),
-        jnp.zeros_like(state_batch.shape[0]),
-        state.apply_fn(target_params, next_state_batch).max(1),
+    next_obs_values = jnp.where(
+        jnp.isnan(next_obs_batch).any(1),
+        jnp.zeros_like(obs_batch.shape[0]),
+        state.apply_fn(target_params, next_obs_batch).max(1),
     )
-    expected_state_action_values = (next_state_values * gamma) + reward_batch
+    expected_state_action_values = (next_obs_values * gamma) + reward_batch
 
     def loss_fn(params, delta=1.0):
         # Compute Q(s_t, a)
-        state_action_values = state.apply_fn(params, state_batch)[jnp.arange(action_batch.shape[0]), action_batch]
+        state_action_values = state.apply_fn(params, obs_batch)[jnp.arange(action_batch.shape[0]), action_batch]
         # Then Huber loss
         dist = jnp.abs(state_action_values - expected_state_action_values)
         return jnp.mean(jnp.where(dist < delta, 0.5 * dist**2 / delta, dist - 0.5 * delta))
@@ -158,9 +164,8 @@ if __name__ == "__main__":
                 client.memory.push(observation, action, next_observation, reward)
                 observation = next_observation
                 if len(client.memory) >= batch_size:
-                    transitions = client.memory.sample(batch_size)
-                    batch = Transition(*zip(*transitions))
-                    loss, client.state = learner_step(client.state, client.target_params, batch)
+                    batch = client.memory.sample(batch_size)
+                    loss, client.state = learner_step(client.state, client.target_params, *batch)
                 else:
                     loss = 0.0
 
