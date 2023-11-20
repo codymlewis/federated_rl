@@ -21,7 +21,7 @@ class ReplayMemory:
         self.push_index = 0
         self.rng = np.random.default_rng(seed)
         self.observations = np.zeros((capacity,) + obs_shape, dtype=np.float32)
-        self.actions = np.zeros((capacity,) + act_shape, dtype=np.float32)
+        self.actions = np.zeros((capacity,) + act_shape, dtype=np.int8)
         self.next_observations = np.zeros((capacity,) + obs_shape, dtype=np.float32)
         self.rewards = np.zeros(capacity, dtype=np.float32)
 
@@ -140,7 +140,7 @@ if __name__ == "__main__":
             tx=optax.amsgrad(1e-3),
         ),
         model.init(jax.random.PRNGKey(seed), observation),
-        ReplayMemory(10000)
+        ReplayMemory(observation.shape, (env.action_space.n), 10000)
     ) for _ in range(num_clients)]
 
     episode_durations = []
