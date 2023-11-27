@@ -5,7 +5,7 @@ from flax.training import train_state, orbax_utils
 import orbax.checkpoint as ocp
 import optax
 
-import main
+import train
 
 
 if __name__ == "__main__":
@@ -14,7 +14,7 @@ if __name__ == "__main__":
     ckpt_mgr = ocp.CheckpointManager(
         "trained_model", ocp.Checkpointer(ocp.PyTreeCheckpointHandler()), options=None
     )
-    model = main.DQN(env.action_space.n)
+    model = train.DQN(env.action_space.n)
     params = model.init(jax.random.PRNGKey(0), observation)
     params = ckpt_mgr.restore(
         ckpt_mgr.latest_step(),
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     state = train_state.TrainState.create(apply_fn=model.apply, params=params, tx=optax.identity())
 
     for i in itertools.count():
-        action = main.select_action(state, observation, 0, evaluation=True)
+        action = train.select_action(state, observation, 0, evaluation=True)
         observation, reward, terminated, truncated, info = env.step(action.item())
         if terminated or truncated:
             break
