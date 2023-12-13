@@ -15,6 +15,7 @@ tqdm = "^4.66.1"
 swig = "^4.1.1.post0"
 matplotlib = "^3.8.1"
 orbax = "^0.1.9"
+safeflax = { git = "git@github.com:codymlewis/safeflax.git" }
 
 [tool.poetry.group.dev.dependencies]
 autopep8 = "^2.0.4"

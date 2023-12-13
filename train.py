@@ -6,12 +6,12 @@ import gymnasium as gym
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
-from flax.training import train_state, orbax_utils
+from flax.training import train_state
 import optax
 from tqdm import trange
 import numpy as np
 import chex
-import orbax.checkpoint as ocp
+import safeflax
 
 
 class ReplayMemory:
@@ -122,10 +122,34 @@ def interpolate_params(params_a, params_b, tau):
     return jax.tree_util.tree_map(lambda a, b: b * tau + a * (1 - tau), params_a, params_b)
 
 
+def flatten_params(params, key_prefix=""):
+    flattened_params = {}
+    for key, value in params.items():
+        key_name = key if key_prefix == "" else f"{key_prefix}.{key}"
+        if isinstance(value, dict):
+            flattened_params.update(flatten_params(value, key_prefix=key_name))
+        else:
+            flattened_params[key_name] = value
+    return flattened_params
+
+
+def unflatten_params(params):
+    unflattened_params = {}
+    for key, value in params.items():
+        subkeys = key.split('.')
+        unflattened_params_tmp = unflattened_params
+        for subkey in subkeys[:-1]:
+            if not unflattened_params_tmp.get(subkey):
+                unflattened_params_tmp[subkey] = {}
+            unflattened_params_tmp = unflattened_params_tmp[subkey]
+        unflattened_params_tmp[subkeys[-1]] = value
+    return unflattened_params
+
+
 if __name__ == "__main__":
     batch_size = 128
     tau = 0.005
-    num_episodes = 400
+    num_episodes = 10
     num_clients = 10
     seed = 62
     random.seed(seed)
@@ -183,15 +207,10 @@ if __name__ == "__main__":
         pbar.set_postfix_str("AVG Loss (STD): {:.5f} ({:.5f}), AVG Dur (STD): {:5.3f} ({:5.3f})".format(
             np.mean(losses), np.std(losses), np.mean(episode_durations[-1]), np.std(episode_durations[-1])
         ))
-
     env.close()
 
     print("Average episode durations:")
     print(np.mean(episode_durations, -1))
-    print()
-
-    ckpt_mgr = ocp.CheckpointManager(
-        "trained_model", ocp.Checkpointer(ocp.PyTreeCheckpointHandler()), options=ocp.CheckpointManagerOptions(create=True)
-    )
-    ckpt_mgr.save(num_episodes, global_params, save_kwargs={'save_args': orbax_utils.save_args_from_target(global_params)})
-    print("Saved the final global model to the 'trained_model' folder.")
+    save_fn = "trained_model.safetensors"
+    safeflax.save_file(global_params, save_fn)
+    print(f"Saved the final global model to the {save_fn} file.")
