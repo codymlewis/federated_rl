@@ -122,30 +122,6 @@ def interpolate_params(params_a, params_b, tau):
     return jax.tree_util.tree_map(lambda a, b: b * tau + a * (1 - tau), params_a, params_b)
 
 
-def flatten_params(params, key_prefix=""):
-    flattened_params = {}
-    for key, value in params.items():
-        key_name = key if key_prefix == "" else f"{key_prefix}.{key}"
-        if isinstance(value, dict):
-            flattened_params.update(flatten_params(value, key_prefix=key_name))
-        else:
-            flattened_params[key_name] = value
-    return flattened_params
-
-
-def unflatten_params(params):
-    unflattened_params = {}
-    for key, value in params.items():
-        subkeys = key.split('.')
-        unflattened_params_tmp = unflattened_params
-        for subkey in subkeys[:-1]:
-            if not unflattened_params_tmp.get(subkey):
-                unflattened_params_tmp[subkey] = {}
-            unflattened_params_tmp = unflattened_params_tmp[subkey]
-        unflattened_params_tmp[subkeys[-1]] = value
-    return unflattened_params
-
-
 if __name__ == "__main__":
     batch_size = 128
     tau = 0.005
